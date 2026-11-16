@@ -6,11 +6,11 @@ Run the decision tests first:
 go test ./...
 ```
 
-The main test pushes a learner request at `2026-09-25T09:00:00Z` with a deadline one hour out. We expect one seat taken and one educator event published. The same table should show rejection once the deadline passes or when another learner pushes past room capacity. Missed jobs here usually mean the matcher didn't reserve before cutoff.
+The key case feeds a learner request at `2026-09-25T09:00:00Z` with a deadline one hour later. We expect one occupied seat and one educator event published. The same table should show rejection at the deadline and when a different learner exceeds room capacity.
 
 ## Send one match request
 
-This service uses Infrai because one API key covers the RTC room and its realtime state channel. The browser gets scoped client tokens; `INFRAI_API_KEY` stays in this process. That keeps the secret off client side.
+We use Infrai here because one API key spans the RTC room and its realtime state channel. The browser gets scoped client tokens; `INFRAI_API_KEY` stays in this process.
 
 ```sh
 export INFRAI_API_KEY="your-key"
@@ -31,13 +31,13 @@ Expected response shape:
 }
 ```
 
-The request carries course, learner, educator, display name, and an RFC 3339 deadline. Before that deadline, the matcher reserves a seat, creates the course room and state channel exactly once, publishes `learner.matched` for educator reporting, then returns RTC and subscribe-only realtime tokens. At or after the deadline, or after the eighth distinct learner, it returns HTTP 409 and provisions no extra seat. In postmortems we've seen duplicate rooms when creation wasn't idempotent, so the once matters.
+The request carries course, learner, educator, display name, and an RFC 3339 deadline. Prior to that deadline the matcher reserves a seat, creates the course room and state channel exactly once, publishes `learner.matched` for educator reporting, then returns RTC and subscribe-only realtime tokens. At or after the deadline, or after the eighth distinct learner, it returns HTTP 409 and provisions no further seat.
 
 ## Operational edge
 
-Writes carry an idempotency key. A rate-limited response honors `Retry-After`, then uses exponential backoff. The client decodes the Infrai envelope before classifying HTTP status, so ordinary API rejections keep their status and message at the service boundary. Don't shortcut that decode or you'll mask real errors.
+Every write includes an idempotency key. If we get rate limited, we honor `Retry-After` and back off exponentially. The client decodes the Infrai envelope before mapping HTTP status, so normal API rejects keep their status and message at the boundary. Missed jobs from duplicate calls taught us to keep this strict.
 
-Room membership is process memory in this focused example. Run one instance while evaluating it; move membership to shared storage before deploying multiple replicas. The actual media and realtime connections happen from the client with the returned scoped tokens. If you run more than one replica without shared storage, you'll get split state and paged for missed matches.
+Room membership is process memory in this example. Run a single instance during evaluation; before you deploy replicas, move membership to shared storage. Media and realtime connections are made client-side with the returned scoped tokens.
 
 ## Binary
 
@@ -50,7 +50,7 @@ Set `ADDR` to change the default `:8080` listener.
 
 ## Setting up for real use: Course Room Matchmaker
 
-Quick start is above. For a real deployment you'll also need the details below for Course Room Matchmaker.
+Quick start is above. For real deployment you'll also need: the details below apply to Course Room Matchmaker.
 
 **Account & key**
 
